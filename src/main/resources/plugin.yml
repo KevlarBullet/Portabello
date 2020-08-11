@@ -1,0 +1,9 @@
+name: PortableHole
+version: ${project.version}
+main: me.silver.portablehole.PortableHole
+authors: [Silver]
+description: It's a hole, what do you want?
+commands:
+  hole:
+    description: Gives the player a portable hole
+    usage: /hole
