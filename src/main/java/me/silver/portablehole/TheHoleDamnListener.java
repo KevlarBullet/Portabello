@@ -1,11 +1,14 @@
 package me.silver.portablehole;
 
-import net.minecraft.server.v1_12_R1.NBTTagByte;
-import net.minecraft.server.v1_12_R1.NBTTagCompound;
+import net.minecraft.server.v1_12_R1.*;
 import org.bukkit.Bukkit;
 import org.bukkit.Location;
 import org.bukkit.Material;
+import org.bukkit.block.Block;
+import org.bukkit.craftbukkit.v1_12_R1.CraftWorld;
+import org.bukkit.craftbukkit.v1_12_R1.entity.CraftPlayer;
 import org.bukkit.craftbukkit.v1_12_R1.inventory.CraftItemStack;
+import org.bukkit.craftbukkit.v1_12_R1.util.CraftMagicNumbers;
 import org.bukkit.entity.Player;
 import org.bukkit.event.EventHandler;
 import org.bukkit.event.Listener;
@@ -14,9 +17,13 @@ import org.bukkit.event.player.PlayerInteractEvent;
 import org.bukkit.inventory.EquipmentSlot;
 import org.bukkit.inventory.ItemStack;
 import org.bukkit.inventory.meta.ItemMeta;
+import org.bukkit.material.MaterialData;
 
+import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.Map;
 
+// This whole class is kinda yikes, not gonna lie
 public class TheHoleDamnListener implements Listener {
 
     private static final String ITEM_NAME = "\u00a7c\u00a7lPortable Hole";
@@ -41,8 +48,8 @@ public class TheHoleDamnListener implements Listener {
 //                        player.sendMessage(tagCompound.toString());
 
                         if (holeCooldowns.get(player.getName()) == null) {
-                            this.startCooldown(player, itemStack);
                             this.digHole(player);
+                            this.startCooldown(player, itemStack);
                         }
 //                        if (tagCompound.getByte("hasCooldown") != 1) {
 //                        }
@@ -128,14 +135,62 @@ public class TheHoleDamnListener implements Listener {
             }
         }
 
-        for (int x = x1; x <= x2; x++) {
-            for (int y = y1; y <= y2; y++) {
-                for (int z = z1; z <= z2; z++) {
-                    Location newLocation = new Location(pl.getWorld(), pl.getBlockX() + x, pl.getBlockY() + y, pl.getBlockZ() + z);
+        ArrayList<PacketPlayOutMultiBlockChange> packetsToSend = new ArrayList<>();
 
+        // 5 nested for loops is kinda yikes
+        for (int cx = x1 >> 4; cx <= x2 >> 4; cx++) {
+            for (int cz = z1 >> 4; cz <= z2 >> 4; cz++) {
+                int xMin = Math.max(cx << 4, x1) % 16;
+                int xMax = Math.min((cx << 4) + 15, x2) % 16;
+                int zMin = Math.max(cz << 4, z1) % 16;
+                int zMax = Math.min((cz << 4) + 15, z2) % 16;
+                int width = (xMax - xMin);
+                int depth = (zMax - zMin);
+                int height = (y2 - y1);
+                int count = width * depth * height;
+
+                Chunk chunk = ((CraftWorld) player.getWorld()).getHandle().getChunkAt(cx, cz);
+                short[] blockChangeInfo = new short[count];
+
+                for (int y = y1; y <= y2; y++) {
+                    for (int x = xMin; x <= xMax; x++) {
+                        for (int z = zMin; z <= zMax; z++) {
+                            // Create block change info
+                            int index = (width * depth * y) + (depth * x) + z;
+                            short blockPos = (short) ((y & 0xFF) | ((z & 0xF) << 8) | ((x & 0xF) << 12));
+                            blockChangeInfo[index] = blockPos;
+
+                            // Get and store block data for replacing blocks
+                            Block block = player.getWorld().getBlockAt(cx + x, y, cz + z);
+                            Location location = block.getLocation();
+                            Material material = block.getType();
+                            MaterialData materialData = block.getState().getData();
+                            byte data = block.getData();
+
+                            BlockHolder holder = new BlockHolder(location, material, materialData, data);
+
+                            // Delete block
+                            
+                        }
+                    }
                 }
+
+                PacketPlayOutMultiBlockChange multiBlockChange = new PacketPlayOutMultiBlockChange(count, blockChangeInfo, chunk);
+                packetsToSend.add(multiBlockChange);
             }
         }
+
+        Bukkit.getServer().getScheduler().runTaskLater(plugin, () -> {
+            for (Player other : Bukkit.getServer().getOnlinePlayers()) {
+                if (other != player) {
+                    EntityPlayer nmsPlayer = ((CraftPlayer) other).getHandle();
+
+                    for (PacketPlayOutMultiBlockChange packet : packetsToSend) {
+                        nmsPlayer.playerConnection.sendPacket(packet);
+                    }
+                }
+            }
+        }, 0L);
     }
 
 }
